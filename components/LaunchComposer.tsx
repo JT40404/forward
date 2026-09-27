@@ -1,10 +1,11 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
+import { getTokenMetadata } from "@solana/spl-token";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import BN from "bn.js";
-import { CLUSTER, PAIR_PRESETS, PLATFORM_FEE, TOTAL_SUPPLY_UI } from "@/lib/config";
+import { CLUSTER, LAUNCHPAD_TAG, PAIR_PRESETS, PLATFORM_FEE, TOTAL_SUPPLY_UI } from "@/lib/config";
 import { fromBaseUnits, isMintAddress, toBaseUnits } from "@/lib/format";
 import { resolveToken, type TokenInfo } from "@/lib/solana";
 import { runLaunch, type LaunchProgress, type StepUpdate } from "@/lib/launch";
@@ -51,6 +52,65 @@ export default function LaunchComposer({
   const [steps, setSteps] = useState<StepUpdate[]>([]);
   const [result, setResult] = useState<LaunchProgress | null>(null);
   const progress = useRef<LaunchProgress>({});
+  const [resumed, setResumed] = useState("");
+
+  const storageKey = wallet.publicKey ? `forward:pending:${wallet.publicKey.toBase58()}` : "";
+  const save = () => {
+    if (!storageKey) return;
+    try {
+      localStorage.setItem(
+        storageKey,
+        JSON.stringify({ progress: progress.current, name, symbol, pairKey, customMint, seed, poolPercent, lock })
+      );
+    } catch {}
+  };
+  const clearSaved = () => {
+    try { if (storageKey) localStorage.removeItem(storageKey); } catch {}
+  };
+
+  // Restore an unfinished launch after a reload, or resume a coin via ?resume=<mint>.
+  useEffect(() => {
+    if (!storageKey || !wallet.publicKey) return;
+    let cancel = false;
+    (async () => {
+      const param = new URLSearchParams(window.location.search).get("resume");
+      if (param && isMintAddress(param)) {
+        try {
+          const md = await getTokenMetadata(connection, new PublicKey(param), "confirmed");
+          const tagged = md?.additionalMetadata?.some(([k, v]) => k === LAUNCHPAD_TAG.key && v === LAUNCHPAD_TAG.value);
+          if (!md || !tagged) throw new Error("That mint isn't a FORWARD coin.");
+          if (!md.updateAuthority?.equals(wallet.publicKey!)) throw new Error("That coin was created by a different wallet.");
+          if (cancel) return;
+          progress.current = { uri: md.uri, mint: param };
+          setName(md.name);
+          setSymbol(md.symbol);
+          onTicker(md.symbol);
+          setResumed(md.symbol);
+        } catch (e) {
+          if (!cancel) setError(explainError(e));
+        }
+        return;
+      }
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if (!raw) return;
+        const d = JSON.parse(raw);
+        if (!d?.progress?.mint || d.progress.pool) return;
+        progress.current = d.progress;
+        setName(d.name || "");
+        setSymbol(d.symbol || "");
+        onTicker(d.symbol || "");
+        if (d.pairKey) setPairKey(d.pairKey);
+        setCustomMint(d.customMint || "");
+        setSeed(d.seed || "1");
+        setPoolPercent(d.poolPercent || "100");
+        setLock(d.lock !== false);
+        setResumed(d.symbol || "your coin");
+      } catch {}
+    })();
+    return () => { cancel = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storageKey]);
 
   const pairMint = pairKey === CUSTOM ? customMint.trim() : pairKey;
 
@@ -112,7 +172,8 @@ export default function LaunchComposer({
     setPreview(f ? URL.createObjectURL(f) : "");
   }
 
-  const step = (s: StepUpdate) =>
+  const step = (s: StepUpdate) => {
+    if (s.state === "done") save();
     setSteps((prev) => {
       const i = prev.findIndex((p) => p.id === s.id);
       if (i === -1) return [...prev, s];
@@ -120,12 +181,13 @@ export default function LaunchComposer({
       next[i] = s;
       return next;
     });
+  };
 
   async function launch() {
     setError("");
     if (!wallet.publicKey) return setVisible(true);
     if (!name.trim() || !symbol.trim()) return setError("Add a coin name and ticker.");
-    if (!image) return setError("Add an image for your coin.");
+    if (!image && !progress.current.uri) return setError("Add an image for your coin.");
     if (!pair) return setError(pairError || "Pick a token to pair with.");
     if (!seedBase) return setError("Enter your starting liquidity as a number.");
     if (seedBase.isZero() && forwardEntries.length === 0) return setError("Add starting liquidity or forward fees from a previous launch.");
@@ -144,7 +206,7 @@ export default function LaunchComposer({
           website: website.trim(),
           twitter: twitter.trim(),
           telegram: telegram.trim(),
-          image,
+          image: image as File,
           pair,
           seed: seedBase,
           poolPercent: pct,
@@ -155,9 +217,12 @@ export default function LaunchComposer({
         step
       );
       setResult({ ...done });
+      clearSaved();
+      setResumed("");
       vault.refresh();
     } catch (e) {
       setSteps((s) => s.map((x) => (x.state === "active" ? { ...x, state: "error" } : x)));
+      save();
       setError(explainError(e) + (progress.current.mint ? " Your progress is saved, so Try again picks up where it stopped." : ""));
     } finally {
       setBusy(false);
@@ -166,6 +231,9 @@ export default function LaunchComposer({
 
   function reset() {
     progress.current = {};
+    clearSaved();
+    setResumed("");
+    if (window.location.search.includes("resume=")) window.history.replaceState(null, "", window.location.pathname);
     setResult(null);
     setSteps([]);
     setName(""); setSymbol(""); setDescription(""); setWebsite(""); setTwitter(""); setTelegram("");
@@ -197,7 +265,17 @@ export default function LaunchComposer({
 
   return (
     <div className="card">
-      <h2>New launch</h2>
+      <h2>{resumed ? `Finish launching $${resumed}` : "New launch"}</h2>
+      {resumed && (
+        <div className="forward-box on" role="status">
+          <span style={{ fontSize: 14, lineHeight: 1.5 }}>
+            ${resumed} is already created and in your wallet. Pressing the button below picks up where the launch stopped and opens its pool.
+          </span>
+          <button type="button" className="btn btn-ghost btn-sm" style={{ alignSelf: "flex-start" }} onClick={reset} disabled={busy}>
+            Discard and start a new coin
+          </button>
+        </div>
+      )}
 
       <div className="grid-2">
         <div className="field">
@@ -249,11 +327,11 @@ export default function LaunchComposer({
         <span className="label" id="pair-label">Pair it with</span>
         <div className="chips" role="group" aria-labelledby="pair-label">
           {PAIR_PRESETS.slice(0, 6).map((p) => (
-            <button key={p.mint} type="button" className="chip" aria-pressed={pairKey === p.mint} onClick={() => setPairKey(p.mint)} disabled={busy}>
+            <button key={p.mint} type="button" className="chip" aria-pressed={pairKey === p.mint} onClick={() => setPairKey(p.mint)} disabled={busy || !!progress.current.claimed}>
               {p.symbol}
             </button>
           ))}
-          <button type="button" className="chip" aria-pressed={pairKey === CUSTOM} onClick={() => setPairKey(CUSTOM)} disabled={busy}>
+          <button type="button" className="chip" aria-pressed={pairKey === CUSTOM} onClick={() => setPairKey(CUSTOM)} disabled={busy || !!progress.current.claimed}>
             Any mint
           </button>
         </div>

@@ -44,11 +44,24 @@ export async function sendAndConfirm(
       (await connection.getLatestBlockhash("confirmed")).lastValidBlockHeight;
   }
 
-  const signature = await wallet.sendTransaction(tx, connection, {
-    signers: opts.signers,
-    preflightCommitment: "confirmed",
-    maxRetries: 5,
-  } as any);
+  // Sign in the wallet, then broadcast through our own RPC (/api/rpc) instead of the
+  // wallet's broadcaster. Preflight simulation then returns the real program error.
+  let signature: string;
+  if (wallet.signTransaction) {
+    if (tx instanceof Transaction && opts.signers?.length) tx.partialSign(...opts.signers);
+    const signed = await wallet.signTransaction(tx);
+    signature = await connection.sendRawTransaction(signed.serialize(), {
+      skipPreflight: false,
+      preflightCommitment: "confirmed",
+      maxRetries: 5,
+    });
+  } else {
+    signature = await wallet.sendTransaction(tx, connection, {
+      signers: opts.signers,
+      preflightCommitment: "confirmed",
+      maxRetries: 5,
+    } as any);
+  }
 
   await waitForConfirmation(connection, signature, lastValidBlockHeight);
   return signature;
@@ -73,11 +86,22 @@ async function waitForConfirmation(
   }
 }
 
+/** Pulls the most useful line out of a failed simulation's program logs. */
+function logHint(e: unknown): string {
+  const logs: string[] | undefined = (e as any)?.logs ?? (e as any)?.transactionLogs;
+  if (!Array.isArray(logs)) return "";
+  const line =
+    logs.find((l) => /Error Message:/i.test(l)) ||
+    logs.find((l) => /insufficient|custom program error|failed/i.test(l));
+  return line ? line.replace(/^Program log:\s*/, "").trim() : "";
+}
+
 /** Turns wallet / RPC errors into a sentence a person can act on. */
 export function explainError(e: unknown): string {
-  const msg = e instanceof Error ? e.message : String(e);
+  const hint = logHint(e);
+  const msg = (e instanceof Error ? e.message : String(e)) + (hint ? ` (${hint})` : "");
   if (/User rejected|rejected the request/i.test(msg)) return "You declined the transaction in your wallet.";
-  if (/insufficient (funds|lamports)|0x1\b/i.test(msg)) return "Your wallet doesn't have enough balance for this step (including SOL for fees and rent).";
+  if (/insufficient (funds|lamports)|0x1\b|InsufficientFunds/i.test(msg)) return "Your wallet doesn't have enough balance for this step (including SOL for fees and rent).";
   if (/blockhash not found|block height exceeded/i.test(msg)) return "The network was congested and the transaction expired. Try again.";
   return msg.length > 240 ? msg.slice(0, 240) + "…" : msg;
 }
