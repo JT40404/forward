@@ -2,14 +2,17 @@ import { NextResponse } from "next/server";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { getTokenMetadata } from "@solana/spl-token";
 import { CollectFeeMode, CpAmm } from "@meteora-ag/cp-amm-sdk";
-import { LAUNCHPAD_TAG, RPC_URL, presetSymbol } from "@/lib/config";
+import { LAUNCHPAD_TAG, presetSymbol } from "@/lib/config";
 import { LIST_KEY, poolKey, redis, type LaunchRecord } from "@/lib/registry";
 import { shortAddr } from "@/lib/format";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const connection = () => new Connection(process.env.RPC_URL || RPC_URL, "confirmed");
+const connection = () => {
+  if (!process.env.RPC_URL) throw new Error("RPC_URL is not set on the server");
+  return new Connection(process.env.RPC_URL, "confirmed");
+};
 
 export async function GET() {
   const db = redis();

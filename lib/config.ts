@@ -4,11 +4,14 @@ export const CLUSTER = (process.env.NEXT_PUBLIC_CLUSTER || "mainnet-beta") as
   | "mainnet-beta"
   | "devnet";
 
-export const RPC_URL =
-  process.env.NEXT_PUBLIC_RPC_URL ||
-  (CLUSTER === "devnet"
-    ? "https://api.devnet.solana.com"
-    : "https://api.mainnet-beta.solana.com");
+/**
+ * The browser never sees the RPC key: it talks to /api/rpc on this site,
+ * which forwards to RPC_URL (a server-only Secret).
+ */
+export function clientRpcEndpoint(): string {
+  const origin = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
+  return `${origin}/api/rpc`;
+}
 
 export const PRIORITY_MICROLAMPORTS = Number(
   process.env.NEXT_PUBLIC_PRIORITY_MICROLAMPORTS || 200_000

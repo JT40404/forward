@@ -30,8 +30,7 @@ A coin counts as a FORWARD coin when its Token-2022 metadata carries `launchpad 
 2. **Import into Vercel**: vercel.com → Add New → Project → pick the repo. Framework: Next.js (auto-detected).
 3. **Add storage**: in the Vercel project go to Storage → Marketplace → Upstash (Redis). It injects the `KV_REST_API_URL` / `KV_REST_API_TOKEN` (or `UPSTASH_REDIS_REST_*`) variables automatically.
 4. **Set environment variables** (Settings → Environment Variables). See `.env.example`. You need at least:
-   - `NEXT_PUBLIC_RPC_URL`: a paid mainnet RPC (Helius, Triton, QuickNode). Restrict the key to your domain in the provider's dashboard, since it's visible in the browser.
-   - `RPC_URL`: server-side RPC for verifying launches (can be the same).
+   - `RPC_URL` (**Secret**): a paid mainnet RPC with its key (Helius, Triton, QuickNode). It stays on the server: the browser calls `/api/rpc` on your own site, which forwards only the methods FORWARD uses.
    - `PINATA_JWT` and optionally `PINATA_GATEWAY`.
    - `JUPITER_API_KEY` (optional, higher rate limits).
    - `NEXT_PUBLIC_PLATFORM_FEE_WALLET` + `NEXT_PUBLIC_PLATFORM_FEE_SOL` if you want to charge per launch.
@@ -46,7 +45,7 @@ npm run dev
 
 ## Test on devnet first
 
-Set `NEXT_PUBLIC_CLUSTER=devnet` and `NEXT_PUBLIC_RPC_URL=https://api.devnet.solana.com` (or a devnet Helius URL). DAMM v2 uses the same program ID on devnet.
+Set `NEXT_PUBLIC_CLUSTER=devnet` and `RPC_URL` to a devnet RPC (e.g. your Helius devnet URL). DAMM v2 uses the same program ID on devnet.
 
 Launching, claiming and same-pair Fee Forward all work on devnet. Cross-pair Fee Forward needs Jupiter, which is mainnet only, so do one small mainnet launch before announcing.
 
@@ -67,5 +66,6 @@ Suggested checklist:
 ## Before you go live
 
 - This code hasn't had a security audit. The on-chain programs it calls have been audited by their teams; this frontend and its API routes have not.
+- `/api/rpc` spends your RPC credits. It only allows the methods the app needs and rejects other websites, but add a Vercel Firewall rate-limit rule on `/api/rpc` and set a usage cap in your RPC dashboard.
 - `/api/upload` is public. Add rate limiting (e.g. Vercel Firewall or `@upstash/ratelimit`) so no one burns through your Pinata quota.
 - Running a token launchpad can carry legal and regulatory obligations depending on where you and your users are. Get advice from a lawyer for your jurisdiction.

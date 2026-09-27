@@ -50,14 +50,27 @@ export async function sendAndConfirm(
     maxRetries: 5,
   } as any);
 
-  const res = await connection.confirmTransaction(
-    { signature, blockhash, lastValidBlockHeight },
-    "confirmed"
-  );
-  if (res.value.err) {
-    throw new Error(`Transaction failed on-chain: ${JSON.stringify(res.value.err)}`);
-  }
+  await waitForConfirmation(connection, signature, lastValidBlockHeight);
   return signature;
+}
+
+/** HTTP polling instead of websockets, so it works through the /api/rpc proxy. */
+async function waitForConfirmation(
+  connection: Connection,
+  signature: string,
+  lastValidBlockHeight: number
+): Promise<void> {
+  for (;;) {
+    const { value } = await connection.getSignatureStatuses([signature]);
+    const st = value[0];
+    if (st?.err) throw new Error(`Transaction failed on-chain: ${JSON.stringify(st.err)}`);
+    if (st && (st.confirmationStatus === "confirmed" || st.confirmationStatus === "finalized")) return;
+    const height = await connection.getBlockHeight("confirmed");
+    if (height > lastValidBlockHeight) {
+      throw new Error("block height exceeded: the transaction expired before it confirmed.");
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
 }
 
 /** Turns wallet / RPC errors into a sentence a person can act on. */
