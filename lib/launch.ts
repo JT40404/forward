@@ -117,7 +117,7 @@ export async function runLaunch(
       const buy = f.seed.add(new BN(progress.forwarded || "0"));
       onStep({
         id: "mint",
-        label: `Creating $${f.symbol} on pump.fun${buy.gtn(0) ? " with your dev buy" : ""} (approve in wallet)`,
+        label: `Creating $${f.symbol} on pump.fun${buy.gtn(0) ? " with your dev buy" : ""} (approve in wallet; it may ask twice)`,
         state: "active",
       });
       const { tx, mint, bondingCurve } = await buildPumpCreateTx(connection, owner, {
