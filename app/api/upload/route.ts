@@ -3,32 +3,77 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
-const PINATA_UPLOAD = "https://uploads.pinata.cloud/v3/files";
+const PINATA_V3 = "https://uploads.pinata.cloud/v3/files";
+const PINATA_LEGACY = "https://api.pinata.cloud/pinning/pinFileToIPFS";
 
-function gatewayUrl(cid: string): string {
-  const gw = process.env.PINATA_GATEWAY;
-  return gw ? `https://${gw.replace(/^https?:\/\//, "")}/ipfs/${cid}` : `https://gateway.pinata.cloud/ipfs/${cid}`;
+/** Accepts the JWT with or without a "Bearer " prefix, quotes or stray whitespace. */
+function pinataJwt(): string {
+  return String(process.env.PINATA_JWT || "")
+    .trim()
+    .replace(/^["']|["']$/g, "")
+    .replace(/^Bearer\s+/i, "")
+    .trim();
 }
 
+function gatewayUrl(cid: string): string {
+  const gw = (process.env.PINATA_GATEWAY || "").trim().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  return gw ? `https://${gw}/ipfs/${cid}` : `https://gateway.pinata.cloud/ipfs/${cid}`;
+}
+
+function explainPinata(status: number, body: string): string {
+  if (status === 401) return "Pinata rejected the key (401). PINATA_JWT is wrong or expired: paste the JWT, not the API key or secret.";
+  if (status === 403) return "Pinata key doesn't have upload permission (403). Create a new key with Admin access, or enable file uploads on it.";
+  if (status === 429) return "Pinata rate limit hit (429). Wait a minute and try again.";
+  if (/plan|limit|quota|storage/i.test(body)) return `Pinata account limit reached (${status}). Check your plan's storage and file count.`;
+  return `Pinata upload failed (${status})${body ? `: ${body.slice(0, 160)}` : ""}`;
+}
+
+/** Tries Pinata's current v3 upload API, then the legacy pinning API (works with older keys). */
 async function pin(file: Blob, name: string): Promise<string> {
-  const fd = new FormData();
-  fd.set("file", file, name);
-  fd.set("network", "public");
-  const r = await fetch(PINATA_UPLOAD, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${process.env.PINATA_JWT}` },
-    body: fd,
+  const jwt = pinataJwt();
+  const v3 = new FormData();
+  v3.set("file", file, name);
+  v3.set("network", "public");
+  const r1 = await fetch(PINATA_V3, { method: "POST", headers: { Authorization: `Bearer ${jwt}` }, body: v3 });
+  const t1 = await r1.text();
+  if (r1.ok) {
+    const cid = JSON.parse(t1)?.data?.cid;
+    if (cid) return cid;
+  }
+
+  const legacy = new FormData();
+  legacy.set("file", file, name);
+  legacy.set("pinataMetadata", JSON.stringify({ name }));
+  const r2 = await fetch(PINATA_LEGACY, { method: "POST", headers: { Authorization: `Bearer ${jwt}` }, body: legacy });
+  const t2 = await r2.text();
+  if (r2.ok) {
+    const cid = JSON.parse(t2)?.IpfsHash;
+    if (cid) return cid;
+  }
+  console.error("Pinata v3:", r1.status, t1.slice(0, 300), "| legacy:", r2.status, t2.slice(0, 300));
+  // Report whichever failure is more informative (an auth error beats a generic one).
+  const [status, body] = [401, 403, 429].includes(r1.status) ? [r1.status, t1] : [r2.status, t2];
+  throw new Error(explainPinata(status, body));
+}
+
+/** GET /api/upload checks the Pinata key without uploading anything. */
+export async function GET() {
+  if (!pinataJwt()) return NextResponse.json({ ok: false, error: "PINATA_JWT is not set on the server." }, { status: 500 });
+  const r = await fetch("https://api.pinata.cloud/data/testAuthentication", {
+    headers: { Authorization: `Bearer ${pinataJwt()}` },
+    cache: "no-store",
   });
-  const j = await r.json().catch(() => ({}));
-  const cid = j?.data?.cid;
-  if (!r.ok || !cid) throw new Error(`Pinata upload failed (${r.status})`);
-  return cid;
+  const body = await r.text();
+  return NextResponse.json(
+    r.ok ? { ok: true, message: "Pinata key works." } : { ok: false, error: explainPinata(r.status, body) },
+    { status: r.ok ? 200 : 500 }
+  );
 }
 
 const clip = (v: FormDataEntryValue | null, n: number) => String(v ?? "").trim().slice(0, n);
 
 export async function POST(req: Request) {
-  if (!process.env.PINATA_JWT) {
+  if (!pinataJwt()) {
     return NextResponse.json({ error: "Uploads aren't configured. Set PINATA_JWT." }, { status: 500 });
   }
   try {

@@ -53,6 +53,19 @@ input::placeholder, textarea::placeholder { color: #5d7d7b; }
 .section { margin-top: 64px; }
 .row-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
 
+/* Contract address bar */
+.ca-bar { background: linear-gradient(90deg, rgba(14, 112, 115, 0.35), rgba(25, 185, 177, 0.18) 50%, rgba(14, 112, 115, 0.35)); border-bottom: 1px solid var(--teal-deep); box-shadow: 0 0 18px rgba(25, 185, 177, 0.18); }
+.ca-bar .wrap { min-height: 44px; display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; padding-top: 6px; padding-bottom: 6px; }
+.ca-label { font-family: var(--display); font-weight: 800; font-size: 13px; letter-spacing: 0.08em; color: var(--glow); text-shadow: 0 0 10px rgba(66, 227, 212, 0.6); white-space: nowrap; }
+.ca-addr { background: rgba(2, 7, 8, 0.7); border: 1px solid var(--teal-deep); color: var(--text); border-radius: 8px; padding: 6px 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; cursor: pointer; }
+.ca-addr:hover { border-color: var(--teal-bright); box-shadow: var(--glow-sm); }
+.ca-short { display: none; }
+.ca-btn { height: 30px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--teal-deep); background: transparent; color: var(--teal-bright); font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; text-decoration: none; }
+.ca-btn:hover { color: var(--glow); border-color: var(--teal-bright); }
+.ca-btn.solid { background: var(--teal); color: var(--on-teal); border-color: var(--teal-bright); }
+.ca-btn.solid:hover { color: var(--on-teal); box-shadow: 0 0 14px rgba(66, 227, 212, 0.55); }
+.ca-soon { font-size: 13px; color: var(--text-2); }
+
 /* Header */
 .util { background: #010405; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--text-2); }
 .util .wrap { height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
@@ -245,6 +258,11 @@ details.more[open] summary { margin-bottom: 12px; }
   .ff { grid-template-columns: 1fr; padding: 32px; }
 }
 @media (max-width: 720px) {
+  .ca-full { display: none; }
+  .ca-short { display: inline; }
+  .ca-bar .wrap { gap: 6px; padding-left: 10px; padding-right: 10px; }
+  .ca-bar .ca-btn.scan { display: none; }
+  .ca-label { font-size: 11px; }
   .util, .cats, .head .launch-cta { display: none; }
   .head .wrap { justify-content: space-between; }
   .head .wrap { flex-wrap: wrap; gap: 12px; }

@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Orbitron, IBM_Plex_Sans } from "next/font/google";
 import Providers from "./providers";
+import CABar from "@/components/CABar";
 import "./globals.css";
 
 const display = Orbitron({ subsets: ["latin"], weight: ["500", "700", "800"], variable: "--font-display" });
@@ -17,6 +18,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${display.variable} ${body.variable}`}>
       <body>
+        <CABar />
         <Providers>{children}</Providers>
       </body>
     </html>
